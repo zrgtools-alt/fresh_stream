@@ -1,11 +1,10 @@
 import time
-import threading
 from flask import Flask, request, jsonify
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, TimeoutError
 
 app = Flask(__name__)
 
-# Only FREE / PUBLIC channels (expand as needed)
+# ✅ Only FREE / PUBLIC channels
 CHANNELS = {
     "green-entertainment": "https://tamashaweb.com/live/green-entertainment",
     "ary-news": "https://tamashaweb.com/live/ary-news",
@@ -15,13 +14,10 @@ PLAYWRIGHT_ARGS = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
+    "--disable-gpu",
 ]
 
-def fetch_fresh_m3u8(page_url: str, timeout: int = 25000) -> str | None:
-    """
-    Opens the page and listens for HLS playlist URLs containing wmsAuthSign.
-    Returns the latest matching m3u8 URL or None.
-    """
+def fetch_fresh_m3u8(page_url: str) -> str | None:
     found_urls = []
 
     with sync_playwright() as p:
@@ -32,10 +28,12 @@ def fetch_fresh_m3u8(page_url: str, timeout: int = 25000) -> str | None:
         context = browser.new_context()
         page = context.new_page()
 
+        # 🔥 Capture ALL responses
         def on_response(response):
             try:
                 url = response.url
-                if "playlist.m3u8" in url and "wmsAuthSign" in url:
+                if ".m3u8" in url and "wmsAuthSign" in url:
+                    print("FOUND HLS:", url)
                     found_urls.append(url)
             except Exception:
                 pass
@@ -43,15 +41,29 @@ def fetch_fresh_m3u8(page_url: str, timeout: int = 25000) -> str | None:
         page.on("response", on_response)
 
         try:
-            page.goto(page_url, wait_until="networkidle", timeout=timeout)
-            # Extra wait for delayed HLS calls
-            time.sleep(8)
-        except PlaywrightTimeout:
-            pass
+            print("Opening page:", page_url)
+            page.goto(page_url, wait_until="domcontentloaded", timeout=30000)
+
+            # ⏳ Tamasha HLS delay
+            print("Waiting for HLS requests...")
+            time.sleep(15)
+
+        except TimeoutError:
+            print("Page load timeout")
         finally:
             browser.close()
 
+    # Return latest signed URL
     return found_urls[-1] if found_urls else None
+
+
+@app.route("/", methods=["GET", "HEAD"])
+def home():
+    return {
+        "status": "ok",
+        "service": "fresh-stream-api",
+        "usage": "/api/fresh_stream?channel=ary-news"
+    }
 
 
 @app.route("/api/fresh_stream", methods=["GET"])
@@ -88,5 +100,4 @@ def api_fresh_stream():
 
 
 if __name__ == "__main__":
-    # For local testing only
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000)
