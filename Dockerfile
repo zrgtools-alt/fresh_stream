@@ -35,4 +35,5 @@ RUN playwright install chromium
 COPY app.py .
 
 EXPOSE 5000
-CMD ["python", "app.py"]
+CMD ["gunicorn", "-w", "2", "-k", "gthread", "-t", "120", "-b", "0.0.0.0:5000", "app:app"]
+
