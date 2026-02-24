@@ -22,35 +22,51 @@ def fetch_fresh_m3u8(url):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=ARGS)
         ctx = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            viewport={"width": 1280, "height": 720},
         )
         page = ctx.new_page()
 
-        def on_response(res):
-            try:
-                u = res.url
-                if ".m3u8" in u and "wmsAuthSign" in u:
-                    print("HLS FOUND:", u)
-                    found.append(u)
-            except:
-                pass
+        # 🔥 Capture BOTH responses + requests
+        def sniff(u):
+            if ".m3u8" in u and "wmsAuthSign" in u:
+                print("FOUND HLS:", u)
+                found.append(u)
 
-        page.on("response", on_response)
+        page.on("response", lambda r: sniff(r.url))
+        page.on("request", lambda r: sniff(r.url))
 
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(5)
 
-        # 🔥 AUTO CLICK PLAY (CRITICAL)
+        # 🔥 Handle iframe player
         try:
-            page.mouse.click(640, 360)   # center click
-            time.sleep(2)
-            page.keyboard.press("Space")
+            frame = page.frame_locator("iframe").first
+            frame.locator("video").evaluate(
+                """v => {
+                    v.muted = true;
+                    v.play();
+                }"""
+            )
+        except:
+            pass
+
+        # 🔥 Fallback: force JS play on any video
+        try:
+            page.evaluate("""
+                () => {
+                    const v = document.querySelector('video');
+                    if (v) {
+                        v.muted = true;
+                        v.play();
+                    }
+                }
+            """)
         except:
             pass
 
         # ⏳ wait for HLS
-        time.sleep(20)
-
+        time.sleep(25)
         browser.close()
 
     return found[-1] if found else None
@@ -79,7 +95,7 @@ def api():
         "success": True,
         "channel": channel,
         "stream_url": stream,
-        "note": "expires in ~10–30 minutes"
+        "note": "Signed URL expires in ~10–30 minutes"
     }
 
 
